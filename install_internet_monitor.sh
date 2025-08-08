@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # --- Install Script for AllStarLink Internet Monitor ---
+# The file was created from the mind of Freddie Mac - KD5FMU Ham Radio Crusader
 # Professional, friendly, and just a little bit hammy.
 
 echo "Welcome to the AllStarLink Internet Monitor Installer!"
