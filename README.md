@@ -16,3 +16,20 @@ It's not perfect and needs testing and ANY contributions will be seriously consi
 ## Step One
 
 Download the Installation Script file.
+```
+sudo wget https://raw.githubusercontent.com/KD5FMU/Internet-Monitor-ASL3/refs/heads/main/install_internet_monitor.sh
+```
+
+Then we need to make it executable
+```
+sudo chmod +x install_internet_monitor.sh
+```
+Then we can execute and get the install moving
+```
+sudo ./install_internet_monitor.sh
+```
+
+Then give it a good test
+
+73 and Report Back
+
