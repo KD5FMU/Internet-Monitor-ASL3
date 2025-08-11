@@ -13,7 +13,7 @@ BUT!!
 
 It's not perfect and needs testing and ANY contributions will be seriously considered. This is another step in making the AllStarLink experience even better!
 
-## Step One
+## Start Here
 
 Download the Installation Script file.
 ```
