@@ -103,7 +103,7 @@ systemctl restart internet-monitor.service
 
 echo
 echo "Installation complete!"
-echo "Your AllStarLink node will now check internet connectivity every 60 seconds and play an audio file when connection is lost or restored."
+echo "Your AllStarLink node will now check internet connectivity every 180 seconds and play an audio file when connection is lost or restored."
 echo "If you ever want to change the node number, just re-run this installer script."
 echo
-echo "If you hear 'internet-no' on the air, don't panic—you're just out of the digital woods. 73!"
+echo "If you hear 'internet-disconnected' on the air, don't panic—you're just out of the digital woods. 73!"
