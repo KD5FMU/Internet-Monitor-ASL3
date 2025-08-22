@@ -5,7 +5,7 @@
 # Professional, friendly, and just a little bit hammy.
 # Enhanced with better error handling, logging, and reliability
 # Copyright (C) 2025 Jory A. Pratt <geekypenguin@gmail.com>
-# Released under the GNU General Public License v2 or later.
+# Released under the GNU General Public License v3.0
 
 # Colors for output
 RED='\033[0;31m'
@@ -91,7 +91,7 @@ create_monitor_script() {
 
 # Enhanced Internet Monitor Script for AllStarLink ASL3+
 # Copyright (C) 2025 Jory A. Pratt <geekypenguin@gmail.com>
-# Released under the GNU General Public License v2 or later.
+# Released under the GNU General Public License v3.0
 
 # Load configuration
 CONFIG_FILE="/etc/internet-monitor.conf"
