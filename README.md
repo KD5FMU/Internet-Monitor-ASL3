@@ -147,7 +147,7 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 ## 🙏 Acknowledgments
 
 - AllStarLink community for feedback and testing
-- Ham Radio Crusader (HRC) for support and encouragement
+- Jory Pratt W5GLR for an Awesome Linux brain and support and encouragement
 
 ---
 
