@@ -33,7 +33,7 @@ A robust internet connectivity monitoring service designed specifically for AllS
 
 1. **Download the installation script**:
    ```bash
-   sudo wget https://raw.githubusercontent.com/hardenedpenguin/Internet-Monitor-ASL3/refs/heads/main/install_internet_monitor.sh
+   https://raw.githubusercontent.com/KD5FMU/Internet-Monitor-ASL3/refs/heads/main/install_internet_monitor.sh
    ```
 
 2. **Make it executable**:
