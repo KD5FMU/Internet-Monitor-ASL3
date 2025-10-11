@@ -108,6 +108,9 @@ LOG_FILE=${LOG_FILE:-"/var/log/internet-monitor.log"}
 ASTERISK_CLI="/usr/sbin/asterisk"
 NETWORK_OK=0
 LAST_STATUS=""
+LAST_RESTART_ATTEMPT=0
+RESTART_COOLDOWN=300  # 5 minutes between restart attempts
+CONSECUTIVE_FAILURES=0
 
 # Logging function
 log_message() {
@@ -182,38 +185,121 @@ function comprehensive_connectivity_test {
     return 1
 }
 
+function detect_network_manager {
+    # Detect which network manager is running
+    if systemctl is-active --quiet NetworkManager; then
+        echo "NetworkManager"
+    elif systemctl is-active --quiet systemd-networkd; then
+        echo "systemd-networkd"
+    elif command -v netplan >/dev/null 2>&1; then
+        echo "netplan"
+    else
+        echo "unknown"
+    fi
+}
+
+function verify_networkmanager_status {
+    # Verify NetworkManager is actually running and functional
+    if ! systemctl is-active --quiet NetworkManager; then
+        print_error "NetworkManager is not active"
+        return 1
+    fi
+    
+    # Check if NetworkManager is in a good state
+    if systemctl is-failed --quiet NetworkManager; then
+        print_error "NetworkManager is in failed state"
+        return 1
+    fi
+    
+    # Give it a moment to settle
+    sleep 2
+    
+    # Check if any network interfaces are up
+    if ip link show | grep -q "state UP"; then
+        print_status "Network interfaces are up"
+        return 0
+    else
+        print_warning "No network interfaces are up yet"
+        return 1
+    fi
+}
+
 function restart_networkmanager {
+    local nm_type=$(detect_network_manager)
+    
+    print_status "Detected network manager: $nm_type"
     print_status "Attempting NetworkManager restart via systemctl..."
     
+    # Check if NetworkManager is available
+    if [ "$nm_type" != "NetworkManager" ]; then
+        print_error "NetworkManager is not the active network manager (detected: $nm_type)"
+        return 1
+    fi
+    
     # Stop NetworkManager
-    if systemctl stop NetworkManager; then
+    if systemctl stop NetworkManager 2>&1 | tee -a "$LOG_FILE"; then
         print_status "NetworkManager stopped successfully"
-        sleep 3
+        sleep 5
         
         # Start NetworkManager
-        if systemctl start NetworkManager; then
-            print_status "NetworkManager started successfully"
-            sleep 5
-            return 0
+        if systemctl start NetworkManager 2>&1 | tee -a "$LOG_FILE"; then
+            print_status "NetworkManager start command issued"
+            sleep 10
+            
+            # Verify it actually started and is functional
+            if verify_networkmanager_status; then
+                print_status "NetworkManager restarted and verified successfully"
+                return 0
+            else
+                print_error "NetworkManager started but is not functional"
+                # Try to get status for debugging
+                systemctl status NetworkManager --no-pager | head -20 >> "$LOG_FILE"
+                return 1
+            fi
         else
             print_error "Failed to start NetworkManager"
+            systemctl status NetworkManager --no-pager | head -20 >> "$LOG_FILE"
             return 1
         fi
     else
         print_error "Failed to stop NetworkManager"
+        systemctl status NetworkManager --no-pager | head -20 >> "$LOG_FILE"
         return 1
     fi
 }
 
 function try_reconnect {
-    print_warning "Attempting to reconnect network..."
+    local current_time=$(date +%s)
+    local time_since_last_restart=$((current_time - LAST_RESTART_ATTEMPT))
+    
+    # Check if we're in cooldown period
+    if [ "$LAST_RESTART_ATTEMPT" -ne 0 ] && [ "$time_since_last_restart" -lt "$RESTART_COOLDOWN" ]; then
+        local time_remaining=$((RESTART_COOLDOWN - time_since_last_restart))
+        print_warning "In cooldown period. Next restart attempt in $time_remaining seconds"
+        return 1
+    fi
+    
+    print_warning "Attempting to reconnect network... (Attempt after $time_since_last_restart seconds)"
+    LAST_RESTART_ATTEMPT=$current_time
     
     # Use proper systemctl commands for NetworkManager
     if restart_networkmanager; then
         print_status "Network reconnection successful"
+        CONSECUTIVE_FAILURES=0
         return 0
     else
         print_error "Network reconnection failed"
+        CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
+        
+        # Implement exponential backoff
+        if [ "$CONSECUTIVE_FAILURES" -ge 3 ]; then
+            RESTART_COOLDOWN=$((RESTART_COOLDOWN * 2))
+            if [ "$RESTART_COOLDOWN" -gt 3600 ]; then
+                RESTART_COOLDOWN=3600  # Cap at 1 hour
+            fi
+            print_warning "Increased cooldown to $RESTART_COOLDOWN seconds after $CONSECUTIVE_FAILURES consecutive failures"
+        fi
+        
         return 1
     fi
 }
@@ -229,6 +315,9 @@ while true; do
             play_audio "$SOUND_DIR/internet-yes"
             print_status "Internet reconnected. AllStarLink node should be back on the network!"
             LAST_STATUS="connected"
+            # Reset cooldown and failure counters on successful connection
+            CONSECUTIVE_FAILURES=0
+            RESTART_COOLDOWN=300
         fi
         NETWORK_OK=1
     else
@@ -312,11 +401,11 @@ StandardError=journal
 User=root
 Group=root
 
-# Security settings
-NoNewPrivileges=true
-ProtectSystem=strict
+# Security settings (relaxed to allow NetworkManager control)
+# NoNewPrivileges=true - Disabled to allow systemctl commands
+# ProtectSystem=strict - Disabled to allow network management
 ProtectHome=true
-ReadWritePaths=/var/log /etc/asterisk
+ReadWritePaths=/var/log /etc/asterisk /run/dbus /var/run/dbus /run/systemd
 
 [Install]
 WantedBy=multi-user.target
