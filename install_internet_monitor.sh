@@ -454,7 +454,7 @@ main() {
     print_status "Log file: /var/log/internet-monitor.log"
     print_status "Configuration: $CONFIG_FILE"
     echo
-    echo "If you hear 'internet-disconnected' on the air, don't panic—you're just out of in the deep woods. 73!"
+    echo "If you hear 'internet-disconnected' on the air, don't panic—you're just out of out the digital woods. 73!"
 }
 
 # Run main function

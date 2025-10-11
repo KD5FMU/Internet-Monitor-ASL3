@@ -33,7 +33,7 @@ A robust internet connectivity monitoring service designed specifically for AllS
 
 1. **Download the installation script**:
    ```bash
-   sudo wget https://raw.githubusercontent.com/hardenedpenguin/Internet-Monitor-ASL3/refs/heads/main/install_internet_monitor.sh
+   sudo wget https://raw.githubusercontent.com/KD5FMU/Internet-Monitor-ASL3/refs/heads/main/install_internet_monitor.sh
    ```
 
 2. **Make it executable**:
@@ -147,7 +147,7 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 ## 🙏 Acknowledgments
 
 - AllStarLink community for feedback and testing
-- Ham Radio Crusader (HRC) for support and encouragement
+- Jory Pratt W5GLR for an Awesome Linux brain and support and encouragement
 
 ---
 
