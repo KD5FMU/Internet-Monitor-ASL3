@@ -57,6 +57,32 @@ A robust internet connectivity monitoring service designed specifically for AllS
    sudo systemctl status internet-monitor
    ```
 
+## 🗑️ Uninstallation
+
+If you need to remove the Internet Monitor service:
+
+1. **Download the uninstall script**:
+   ```bash
+   wget https://raw.githubusercontent.com/KD5FMU/Internet-Monitor-ASL3/refs/heads/main/uninstall_internet_monitor.sh
+   ```
+
+2. **Make it executable**:
+   ```bash
+   chmod +x uninstall_internet_monitor.sh
+   ```
+
+3. **Run the uninstaller**:
+   ```bash
+   sudo ./uninstall_internet_monitor.sh
+   ```
+
+The uninstaller will:
+- Stop and disable the service
+- Remove the systemd service file and monitor script
+- Optionally remove configuration, log, and audio files (with prompts)
+
+**Note**: The uninstaller will prompt you before removing configuration, log, and audio files, allowing you to keep them if desired.
+
 ## ⚙️ Configuration
 
 The service creates a configuration file at `/etc/internet-monitor.conf` with the following settings:
