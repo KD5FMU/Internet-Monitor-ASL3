@@ -15,12 +15,16 @@ A robust internet connectivity monitoring service designed specifically for AllS
 ## ✨ Features
 
 - **Automatic Monitoring**: Checks internet connectivity every 3 minutes (configurable)
+- **Comprehensive Connectivity Testing**: Tests both ping connectivity and DNS resolution for reliable detection
 - **Local Audio Announcements**: Uses AllStarLink's audio system to announce status changes
 - **Multiple Ping Targets**: Tests connectivity against multiple reliable servers (1.1.1.1, 8.8.8.8, 208.67.222.222)
-- **Systemd Service**: Runs as a background service with automatic startup
+- **Automatic Log Rotation**: Logs are automatically rotated when they exceed 10MB to prevent disk space issues
+- **Network Recovery**: Automatically attempts to restart NetworkManager when connectivity is lost
+- **Systemd Service**: Runs as a background service with automatic startup and graceful shutdown
 - **Comprehensive Logging**: Detailed logs for troubleshooting and monitoring
 - **Easy Configuration**: Simple setup process with guided installation
-- **Robust Error Handling**: Enhanced reliability with proper error management
+- **Robust Error Handling**: Enhanced reliability with proper error management and validation
+- **Command Validation**: Validates required system commands at startup
 
 ## 🚀 Quick Start
 
@@ -57,15 +61,27 @@ A robust internet connectivity monitoring service designed specifically for AllS
 
 The service creates a configuration file at `/etc/internet-monitor.conf` with the following settings:
 
-- `NODE_NUMBER`: Your AllStarLink node number
-- `CHECK_INTERVAL`: How often to check connectivity (default: 180 seconds)
-- `PING_HOSTS`: Servers to ping for connectivity testing
+- `NODE_NUMBER`: Your AllStarLink node number (required, positive integer)
+- `CHECK_INTERVAL`: How often to check connectivity in seconds (default: 180, minimum: 30)
+- `PING_HOSTS`: Space-separated list of servers to ping for connectivity testing (default: "1.1.1.1 8.8.8.8 208.67.222.222")
+- `SOUND_DIR`: Directory containing audio files (default: "/usr/share/asterisk/sounds/custom")
+- `LOG_FILE`: Path to log file (default: "/var/log/internet-monitor.log")
+- `ASTERISK_CLI`: Path to Asterisk CLI executable (default: "/usr/sbin/asterisk", auto-detected during install)
+- `MAX_LOG_SIZE`: Maximum log file size in bytes before rotation (default: 10485760 = 10MB)
+- `LOG_RETENTION`: Number of rotated log files to keep (default: 5)
 
 ### Manual Configuration
 
 You can edit the configuration file directly:
 ```bash
 sudo nano /etc/internet-monitor.conf
+```
+
+**⚠️ Important**: The configuration file is sourced directly by the script. Do not add commands, special shell characters (`;`, `&`, `|`, `<`, `>`), or unquoted values with spaces. Only simple variable assignments are allowed.
+
+After modifying the configuration, restart the service:
+```bash
+sudo systemctl restart internet-monitor
 ```
 
 ## 📋 Service Management
@@ -101,6 +117,8 @@ sudo journalctl -u internet-monitor -f
 - **Configuration**: `/etc/internet-monitor.conf`
 - **Service File**: `/etc/systemd/system/internet-monitor.service`
 - **Log File**: `/var/log/internet-monitor.log`
+- **Rotated Logs**: `/var/log/internet-monitor.log.1`, `.2`, `.3`, etc. (automatic rotation)
+- **Audio Files**: `/usr/share/asterisk/sounds/custom/internet-yes.ul` and `internet-no.ul`
 
 ## 🔧 Troubleshooting
 
@@ -114,23 +132,69 @@ sudo systemctl status internet-monitor
 sudo tail -f /var/log/internet-monitor.log
 ```
 
+Or use journalctl for systemd logs:
+```bash
+sudo journalctl -u internet-monitor -f
+```
+
+### View rotated logs
+If logs have been rotated, check older log files:
+```bash
+sudo tail -f /var/log/internet-monitor.log.1
+```
+
 ### Test connectivity manually
 ```bash
 ping -c 3 1.1.1.1
 ```
+
+### Test DNS resolution
+```bash
+getent hosts google.com
+```
+
+### Verify audio files exist
+```bash
+ls -la /usr/share/asterisk/sounds/custom/internet-*.ul
+```
+
+### Check Asterisk CLI path
+```bash
+which asterisk
+# or
+ls -la /usr/sbin/asterisk
+```
+
+If Asterisk is not found, update `ASTERISK_CLI` in `/etc/internet-monitor.conf` with the correct path.
 
 ### Restart the service
 ```bash
 sudo systemctl restart internet-monitor
 ```
 
+### Verify configuration
+The service validates configuration on startup. Check logs for any validation errors:
+```bash
+sudo journalctl -u internet-monitor -n 50
+```
+
 ## 🤝 Contributing
 
-This project welcomes contributions! The current implementation is functional but could benefit from:
+This project welcomes contributions! Current implementation includes:
 
-- Additional testing scenarios
-- Enhanced error handling
-- New features and improvements
+- ✅ Comprehensive error handling and validation
+- ✅ Automatic log rotation
+- ✅ Graceful shutdown handling
+- ✅ Network manager detection and recovery
+- ✅ Multi-method DNS testing
+- ✅ Command validation at startup
+
+Areas that could benefit from additional contributions:
+
+- Additional testing scenarios and edge cases
+- Support for additional network managers beyond NetworkManager
+- Performance optimizations
+- Enhanced monitoring features
 - Documentation improvements
 
 **Please report issues and submit pull requests** - all contributions will be seriously considered to make the AllStarLink experience even better!
