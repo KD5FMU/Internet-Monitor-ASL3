@@ -19,11 +19,14 @@ CONFIG_FILE="/etc/internet-monitor.conf"
 DEFAULT_CHECK_INTERVAL=180
 DEFAULT_PING_HOSTS="1.1.1.1 8.8.8.8 208.67.222.222"
 
-# Logging function
+# Logging function (for installer script)
 log_message() {
     local level="$1"
     local message="$2"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    # Ensure log directory exists
+    mkdir -p "$(dirname /var/log/internet-monitor.log)"
     echo "[$timestamp] [$level] $message" >> /var/log/internet-monitor.log
 }
 
@@ -93,10 +96,51 @@ create_monitor_script() {
 # Copyright (C) 2025 Jory A. Pratt <geekypenguin@gmail.com>
 # Released under the GNU General Public License v3.0
 
-# Load configuration
+# Error handling: exit on error, undefined variables, pipe failures
+set -euo pipefail
+IFS=$'\n\t'
+
+# Global flag for graceful shutdown
+RUNNING=1
+
+# Cleanup function for graceful shutdown
+cleanup() {
+    RUNNING=0
+    print_status "Received shutdown signal, gracefully stopping..."
+    exit 0
+}
+
+# Set up signal handlers for graceful shutdown
+trap cleanup SIGTERM SIGINT
+
+# Validate required commands
+check_commands() {
+    local missing_commands=()
+    
+    for cmd in ping systemctl ip date; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing_commands+=("$cmd")
+        fi
+    done
+    
+    if [ ${#missing_commands[@]} -gt 0 ]; then
+        echo "ERROR: Missing required commands: ${missing_commands[*]}" >&2
+        exit 1
+    fi
+}
+
+# Load configuration with validation
 CONFIG_FILE="/etc/internet-monitor.conf"
 if [ -f "$CONFIG_FILE" ]; then
+    # Validate config file before sourcing (basic security check)
+    if grep -q "^[^#]*[;&|<>]" "$CONFIG_FILE"; then
+        echo "ERROR: Invalid characters in configuration file" >&2
+        exit 1
+    fi
+    # Source config file safely
+    set +u
     source "$CONFIG_FILE"
+    set -u
 fi
 
 # Default values
@@ -105,18 +149,70 @@ CHECK_INTERVAL=${CHECK_INTERVAL:-180}
 PING_HOSTS=${PING_HOSTS:-"1.1.1.1 8.8.8.8 208.67.222.222"}
 SOUND_DIR=${SOUND_DIR:-"/usr/share/asterisk/sounds/custom"}
 LOG_FILE=${LOG_FILE:-"/var/log/internet-monitor.log"}
-ASTERISK_CLI="/usr/sbin/asterisk"
+ASTERISK_CLI=${ASTERISK_CLI:-"/usr/sbin/asterisk"}
+MAX_LOG_SIZE=${MAX_LOG_SIZE:-10485760}  # 10MB default
+LOG_RETENTION=${LOG_RETENTION:-5}  # Keep 5 rotated logs
 NETWORK_OK=0
 LAST_STATUS=""
 LAST_RESTART_ATTEMPT=0
 RESTART_COOLDOWN=300  # 5 minutes between restart attempts
 CONSECUTIVE_FAILURES=0
 
-# Logging function
+# Validate configuration values
+if ! [[ "$NODE" =~ ^[0-9]+$ ]] || [ "$NODE" -lt 1 ]; then
+    echo "ERROR: Invalid NODE_NUMBER: $NODE" >&2
+    exit 1
+fi
+
+if ! [[ "$CHECK_INTERVAL" =~ ^[0-9]+$ ]] || [ "$CHECK_INTERVAL" -lt 30 ]; then
+    echo "ERROR: Invalid CHECK_INTERVAL: $CHECK_INTERVAL (minimum 30 seconds)" >&2
+    exit 1
+fi
+
+# Check commands at startup
+check_commands
+
+# Validate Asterisk CLI path
+if [ ! -x "$ASTERISK_CLI" ]; then
+    echo "WARNING: Asterisk CLI not found at $ASTERISK_CLI, audio playback will be disabled" >&2
+    ASTERISK_CLI=""
+fi
+
+# Log rotation function
+rotate_log() {
+    local log_file="$1"
+    if [ ! -f "$log_file" ]; then
+        return 0
+    fi
+    
+    local log_size
+    log_size=$(stat -f%z "$log_file" 2>/dev/null || stat -c%s "$log_file" 2>/dev/null || echo 0)
+    
+    if [ "$log_size" -gt "$MAX_LOG_SIZE" ]; then
+        # Rotate logs
+        for i in $(seq $((LOG_RETENTION - 1)) -1 1); do
+            if [ -f "${log_file}.${i}" ]; then
+                mv "${log_file}.${i}" "${log_file}.$((i + 1))"
+            fi
+        done
+        mv "$log_file" "${log_file}.1"
+        touch "$log_file"
+    fi
+}
+
+# Logging function with rotation
 log_message() {
     local level="$1"
     local message="$2"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Rotate log if needed
+    rotate_log "$LOG_FILE"
+    
+    # Ensure log file directory exists
+    mkdir -p "$(dirname "$LOG_FILE")"
+    
     echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
 }
 
@@ -138,22 +234,66 @@ print_error() {
 
 function play_audio {
     local audio_file="$1"
-    if [ -f "$audio_file.ul" ]; then
-        # Play audio file over radio via AllStarLink's Asterisk CLI
-        $ASTERISK_CLI -rx "rpt localplay $NODE $audio_file" >/dev/null 2>&1
-        print_status "Played audio: $audio_file"
+    local audio_path
+    
+    # Handle both cases: with and without .ul extension
+    if [[ "$audio_file" == *.ul ]]; then
+        audio_path="$audio_file"
     else
-        print_warning "Audio file not found: $audio_file.ul"
+        audio_path="${audio_file}.ul"
+    fi
+    
+    # Check if file exists with or without path
+    if [ -f "$audio_path" ]; then
+        local full_path="$audio_path"
+    elif [ -f "${SOUND_DIR}/${audio_path}" ]; then
+        local full_path="${SOUND_DIR}/${audio_path}"
+    elif [ -f "${audio_file}.ul" ]; then
+        local full_path="${audio_file}.ul"
+    elif [ -f "${SOUND_DIR}/${audio_file}.ul" ]; then
+        local full_path="${SOUND_DIR}/${audio_file}.ul"
+    else
+        print_warning "Audio file not found: $audio_path (checked $audio_path, ${SOUND_DIR}/${audio_path})"
+        return 1
+    fi
+    
+    # Play audio if Asterisk CLI is available
+    if [ -n "$ASTERISK_CLI" ] && [ -x "$ASTERISK_CLI" ]; then
+        # Extract just the filename without extension for Asterisk
+        local filename
+        filename=$(basename "$full_path" .ul)
+        "$ASTERISK_CLI" -rx "rpt localplay $NODE $filename" >/dev/null 2>&1 || true
+        print_status "Played audio: $filename"
+    else
+        print_warning "Asterisk CLI not available, skipping audio playback"
     fi
 }
 
 function has_internet {
     local hosts="$1"
-    local timeout="$2"
-    timeout=${timeout:-5}
+    local timeout="${2:-5}"
+    local host
+    local old_ifs
     
-    for host in $hosts; do
-        if ping -c 1 -W "$timeout" "$host" > /dev/null 2>&1; then
+    # Convert space-separated hosts to array for safe iteration
+    # This handles hosts that might contain spaces (though IPs shouldn't)
+    local hosts_array
+    old_ifs="$IFS"
+    IFS=' ' read -ra hosts_array <<< "$hosts"
+    IFS="$old_ifs"
+    
+    # Ping with timeout - try GNU/Linux syntax first, then alternatives
+    for host in "${hosts_array[@]}"; do
+        # Skip empty entries
+        [ -z "$host" ] && continue
+        
+        # GNU/Linux ping: -W timeout (wait timeout seconds for response)
+        # This should work on most Linux systems
+        if ping -c 1 -W "$timeout" "$host" >/dev/null 2>&1; then
+            return 0
+        # Fallback: Some systems may use different syntax
+        # Try without timeout flag (will use default timeout)
+        elif ping -c 1 "$host" >/dev/null 2>&1; then
             return 0
         fi
     done
@@ -161,8 +301,21 @@ function has_internet {
 }
 
 function test_dns {
-    # Test DNS resolution
-    if nslookup google.com > /dev/null 2>&1; then
+    # Test DNS resolution using multiple methods for compatibility
+    # Method 1: getent (most universal, available on most systems)
+    if getent hosts google.com >/dev/null 2>&1; then
+        return 0
+    fi
+    # Method 2: host command (common alternative)
+    if command -v host >/dev/null 2>&1 && host google.com >/dev/null 2>&1; then
+        return 0
+    fi
+    # Method 3: nslookup (fallback, may not be available)
+    if command -v nslookup >/dev/null 2>&1 && nslookup google.com >/dev/null 2>&1; then
+        return 0
+    fi
+    # Method 4: dig (last resort)
+    if command -v dig >/dev/null 2>&1 && dig +short google.com >/dev/null 2>&1; then
         return 0
     fi
     return 1
@@ -172,7 +325,7 @@ function comprehensive_connectivity_test {
     # Test multiple connectivity aspects
     local ping_hosts="${PING_HOSTS:-"1.1.1.1 8.8.8.8 208.67.222.222"}"
     
-    # Test basic ping
+    # Test basic ping (properly quoted)
     if has_internet "$ping_hosts" 3; then
         # Test DNS resolution
         if test_dns; then
@@ -225,7 +378,8 @@ function verify_networkmanager_status {
 }
 
 function restart_networkmanager {
-    local nm_type=$(detect_network_manager)
+    local nm_type
+    nm_type=$(detect_network_manager)
     
     print_status "Detected network manager: $nm_type"
     print_status "Attempting NetworkManager restart via systemctl..."
@@ -309,10 +463,14 @@ print_status "Internet monitor started for node $NODE"
 print_status "Check interval: $CHECK_INTERVAL seconds"
 print_status "Ping hosts: $PING_HOSTS"
 
-while true; do
+# Main monitoring loop with graceful shutdown support
+while [ "$RUNNING" -eq 1 ]; do
+    # Temporarily disable error exit for connectivity test (may fail normally)
+    set +e
     if comprehensive_connectivity_test; then
+        set -e
         if [ "$NETWORK_OK" -eq 0 ]; then
-            play_audio "$SOUND_DIR/internet-yes"
+            play_audio "${SOUND_DIR}/internet-yes"
             print_status "Internet reconnected. AllStarLink node should be back on the network!"
             LAST_STATUS="connected"
             # Reset cooldown and failure counters on successful connection
@@ -321,16 +479,26 @@ while true; do
         fi
         NETWORK_OK=1
     else
+        set -e
         if [ "$NETWORK_OK" -eq 1 ]; then
-            play_audio "$SOUND_DIR/internet-no"
+            play_audio "${SOUND_DIR}/internet-no"
             print_warning "Internet lost. AllStarLink node is offline!"
             LAST_STATUS="disconnected"
         fi
         NETWORK_OK=0
+        # Disable error exit for reconnect attempt (may fail normally)
+        set +e
         try_reconnect
+        set -e
     fi
-    sleep "$CHECK_INTERVAL"
+    
+    # Check RUNNING flag before sleep (allows immediate exit on signal)
+    if [ "$RUNNING" -eq 1 ]; then
+        sleep "$CHECK_INTERVAL"
+    fi
 done
+
+print_status "Internet monitor stopped gracefully"
 EOF
 
     chmod +x "$MONITOR_SCRIPT"
@@ -339,14 +507,26 @@ EOF
 
 # Function to create configuration file
 create_config_file() {
+    # Find Asterisk CLI path if it exists
+    local asterisk_path=""
+    if [ -x "/usr/sbin/asterisk" ]; then
+        asterisk_path="/usr/sbin/asterisk"
+    elif command -v asterisk >/dev/null 2>&1; then
+        asterisk_path=$(command -v asterisk)
+    fi
+    
     cat > "$CONFIG_FILE" << EOF
 # Internet Monitor Configuration
 # Copyright (C) 2025 Jory A. Pratt <geekypenguin@gmail.com>
+# DO NOT ADD COMMANDS OR SPECIAL CHARACTERS - This file is sourced directly
 NODE_NUMBER=$NODE_NUMBER
 CHECK_INTERVAL=$CHECK_INTERVAL
 PING_HOSTS="$DEFAULT_PING_HOSTS"
 SOUND_DIR="/usr/share/asterisk/sounds/custom"
 LOG_FILE="/var/log/internet-monitor.log"
+ASTERISK_CLI="${asterisk_path:-/usr/sbin/asterisk}"
+MAX_LOG_SIZE=10485760
+LOG_RETENTION=5
 EOF
     
     chmod 644 "$CONFIG_FILE"
@@ -454,7 +634,7 @@ main() {
     print_status "Log file: /var/log/internet-monitor.log"
     print_status "Configuration: $CONFIG_FILE"
     echo
-    echo "If you hear 'internet-disconnected' on the air, don't panic—you're just out of out the digital woods. 73!"
+    echo "If you hear 'internet-disconnected' on the air, don't panic—you're just out of the digital woods. 73!"
 }
 
 # Run main function
