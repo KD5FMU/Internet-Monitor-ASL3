@@ -1,4 +1,10 @@
-![Internet Monitor Logo](https://github.com/KD5FMU/Internet-Monitor-ASL3/blob/main/Internet%20Monitor.png)
+<p align="center">
+  <img
+    src="images/internetmon.png"
+    alt="Internet Monitor for ASL3"
+    width="100%"
+  />
+</p>
 
 # Internet Monitor for AllStarLink ASL3+
 
