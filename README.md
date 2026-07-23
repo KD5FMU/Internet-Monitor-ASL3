@@ -1,6 +1,6 @@
 <p align="center">
   <img
-    src="images/internetmon.png"
+    src="images./internetmon.png"
     alt="Internet Monitor for ASL3"
     width="100%"
   />
